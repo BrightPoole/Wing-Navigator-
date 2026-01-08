@@ -1,11 +1,12 @@
 
-import React, { useState, useMemo } from 'react';
-import { Fuel, Wind, Ruler, Settings2, Thermometer, PlaneLanding, Navigation2, PlaneTakeoff, AlertTriangle, Timer, ArrowDownRight, ArrowUpRight, Scale, Info, MoveRight } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Fuel, Wind, Ruler, Settings2, Thermometer, PlaneLanding, Navigation2, PlaneTakeoff, AlertTriangle, Timer, ArrowDownRight, ArrowUpRight, Scale, Info, MoveRight, Clock, ChevronRight } from 'lucide-react';
 
 type TabType = 'fuel' | 'wind' | 'takeoff' | 'landing' | 'performance' | 'nav' | 'climb' | 'weight';
 
 const CalculatorView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabType>('nav');
+  const [activeTab, setActiveTab] = useState<TabType>('weight');
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   // Shared Performance State
   const [pressAlt, setPressAlt] = useState('0');
@@ -14,140 +15,171 @@ const CalculatorView: React.FC = () => {
   const [headwindInput, setHeadwindInput] = useState('0');
   const [rwyLen, setRwyLen] = useState('3000');
 
-  // Nav Planning (Time/Distance/Speed/Fuel)
+  // Nav Planning
   const [dist, setDist] = useState('100');
   const [gs, setGs] = useState('110');
   const [burnRate, setBurnRate] = useState('8.5');
 
-  // Wind Triangle State
+  // Wind Triangle
   const [tas, setTas] = useState('110');
   const [windSpeed, setWindSpeed] = useState('15');
   const [windDir, setWindDir] = useState('270');
   const [course, setCourse] = useState('360');
 
-  // Climb/Descent State
+  // Climb/Descent
   const [startAlt, setStartAlt] = useState('1000');
   const [targetAlt, setTargetAlt] = useState('8500');
   const [verticalSpeed, setVerticalSpeed] = useState('500');
   const [groundSpeedCD, setGroundSpeedCD] = useState('100');
 
-  // Weight & Balance State (Simple C172 Model)
-  const [emptyWeight, setEmptyWeight] = useState('1650');
+  // Enhanced Weight & Balance State (Cessna 172S Profile)
+  const [emptyWeight, setEmptyWeight] = useState('1642');
   const [emptyArm, setEmptyArm] = useState('38.5');
-  const [pilotWeight, setPilotWeight] = useState('380'); // 2 people
-  const [pilotArm] = useState('37.0');
-  const [rearWeight, setRearWeight] = useState('0');
-  const [rearArm] = useState('73.0');
-  const [fuelGals, setFuelGals] = useState('40');
-  const [fuelArm] = useState('48.0');
+  const [pilotWeight, setPilotWeight] = useState('190');
+  const [copilotWeight, setCopilotWeight] = useState('0');
+  const [rearPaxWeight, setRearPaxWeight] = useState('0');
+  const [baggage1Weight, setBaggage1Weight] = useState('0');
+  const [fuelGals, setFuelGals] = useState('53');
 
-  // Shared Calculations
+  const STATIONS = {
+    FRONT: 37.0,
+    REAR: 73.0,
+    FUEL: 48.0,
+    BAGGAGE: 95.0
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   const densityAlt = useMemo(() => {
     const pa = parseFloat(pressAlt);
     const temp = parseFloat(oat);
     if (isNaN(pa) || isNaN(temp)) return 0;
     const isaTemp = 15 - (2 * (pa / 1000));
-    const da = pa + (120 * (temp - isaTemp));
-    return Math.round(da);
+    return Math.round(pa + (120 * (temp - isaTemp)));
   }, [pressAlt, oat]);
 
-  // Nav Calculations
   const navResults = useMemo(() => {
     const d = parseFloat(dist);
     const s = parseFloat(gs);
     const b = parseFloat(burnRate);
-    if (isNaN(d) || isNaN(s) || isNaN(b) || s <= 0) return { timeMin: 0, fuelReq: 0 };
+    if (isNaN(d) || isNaN(s) || isNaN(b) || s <= 0) return { timeMin: 0, fuelReq: 0, ete: '00:00', eta: '--:--' };
     const timeHr = d / s;
     const timeMin = timeHr * 60;
-    const fuelReq = timeHr * b;
-    return { timeMin: Math.round(timeMin), fuelReq: parseFloat(fuelReq.toFixed(1)) };
-  }, [dist, gs, burnRate]);
+    const eteFormatted = `${Math.floor(timeHr).toString().padStart(2, '0')}:${Math.round((timeHr % 1) * 60).toString().padStart(2, '0')}`;
+    const etaDate = new Date(currentTime.getTime() + timeMin * 60000);
+    return { 
+      timeMin: Math.round(timeMin), 
+      fuelReq: parseFloat((timeHr * b).toFixed(1)),
+      ete: eteFormatted,
+      eta: etaDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    };
+  }, [dist, gs, burnRate, currentTime]);
 
-  // Wind Triangle with Components
   const windResults = useMemo(() => {
     const V_tas = parseFloat(tas);
     const V_ws = parseFloat(windSpeed);
     const D_wd = parseFloat(windDir);
     const D_tc = parseFloat(course);
-    if (isNaN(V_tas) || isNaN(V_ws) || isNaN(D_wd) || isNaN(D_tc) || V_tas === 0) 
-      return { gs: 0, wca: 0, th: 0, headwind: 0, crosswind: 0 };
-
+    if (isNaN(V_tas) || isNaN(V_ws) || isNaN(D_wd) || isNaN(D_tc) || V_tas === 0) return { gs: 0, wca: 0, th: 0, headwind: 0, crosswind: 0 };
     const wd_rad = (D_wd * Math.PI) / 180;
     const tc_rad = (D_tc * Math.PI) / 180;
-    
-    // Wind Components relative to course
     const angleDiff = wd_rad - tc_rad;
     const headwind = V_ws * Math.cos(angleDiff);
-    const crosswind = V_ws * Math.sin(angleDiff);
-
     const wca_rad = Math.asin((V_ws / V_tas) * Math.sin(angleDiff));
-    const wca_deg = (wca_rad * 180) / Math.PI;
-    const groundSpeed = V_tas * Math.cos(wca_rad) - headwind;
-    
-    let th = D_tc + wca_deg;
-    if (th < 0) th += 360;
-    if (th >= 360) th -= 360;
-
+    let th = D_tc + (wca_rad * 180) / Math.PI;
+    if (th < 0) th += 360; if (th >= 360) th -= 360;
     return { 
-      gs: Math.round(groundSpeed), 
-      wca: Math.round(wca_deg), 
+      gs: Math.round(V_tas * Math.cos(wca_rad) - headwind), 
       th: Math.round(th),
       headwind: Math.round(headwind),
-      crosswind: Math.round(crosswind)
+      crosswind: Math.round(V_ws * Math.sin(angleDiff))
     };
   }, [tas, windSpeed, windDir, course]);
 
-  // Climb/Descent Calculations
-  const cdResults = useMemo(() => {
-    const s = parseFloat(startAlt);
-    const t = parseFloat(targetAlt);
-    const vs = parseFloat(verticalSpeed);
-    const speed = parseFloat(groundSpeedCD);
-    if (isNaN(s) || isNaN(t) || isNaN(vs) || isNaN(speed) || vs <= 0) return { time: 0, dist: 0 };
-    
-    const altDiff = Math.abs(t - s);
-    const timeMin = altDiff / vs;
-    const distance = (timeMin / 60) * speed;
-    return { time: Math.round(timeMin), dist: parseFloat(distance.toFixed(1)) };
-  }, [startAlt, targetAlt, verticalSpeed, groundSpeedCD]);
-
-  // Weight & Balance
+  // Enhanced W&B Calculation - Removed fuel burn dependency
   const wbResults = useMemo(() => {
-    const ew = parseFloat(emptyWeight);
-    const ea = parseFloat(emptyArm);
-    const pw = parseFloat(pilotWeight);
-    const rw = parseFloat(rearWeight);
-    const fg = parseFloat(fuelGals);
-    const fw = fg * 6; // 6lb per gal
+    const ew = parseFloat(emptyWeight) || 0;
+    const ea = parseFloat(emptyArm) || 0;
+    const pw = parseFloat(pilotWeight) || 0;
+    const cpw = parseFloat(copilotWeight) || 0;
+    const rpw = parseFloat(rearPaxWeight) || 0;
+    const bw = parseFloat(baggage1Weight) || 0;
+    const fg = parseFloat(fuelGals) || 0;
+    const fw = fg * 6;
 
-    if (isNaN(ew) || isNaN(pw) || isNaN(rw) || isNaN(fg)) return { weight: 0, cg: 0, moment: 0 };
+    const takeoffWeight = ew + pw + cpw + rpw + bw + fw;
+    const takeoffMoment = (ew * ea) + ((pw + cpw) * STATIONS.FRONT) + (rpw * STATIONS.REAR) + (bw * STATIONS.BAGGAGE) + (fw * STATIONS.FUEL);
+    const takeoffCG = takeoffMoment / takeoffWeight;
 
-    const totalWeight = ew + pw + rw + fw;
-    const totalMoment = (ew * ea) + (pw * parseFloat(pilotArm)) + (rw * parseFloat(rearArm)) + (fw * parseFloat(fuelArm));
-    const cg = totalMoment / totalWeight;
+    const zeroFuelWeight = ew + pw + cpw + rpw + bw;
+    const zeroFuelMoment = (ew * ea) + ((pw + cpw) * STATIONS.FRONT) + (rpw * STATIONS.REAR) + (bw * STATIONS.BAGGAGE);
+    const zeroFuelCG = zeroFuelMoment / zeroFuelWeight;
 
     return {
-      weight: Math.round(totalWeight),
-      cg: parseFloat(cg.toFixed(2)),
-      moment: Math.round(totalMoment)
+      takeoff: { weight: Math.round(takeoffWeight), cg: parseFloat(takeoffCG.toFixed(2)), moment: Math.round(takeoffMoment) },
+      zero: { weight: Math.round(zeroFuelWeight), cg: parseFloat(zeroFuelCG.toFixed(2)) },
+      isOverWeight: takeoffWeight > 2550,
+      isCGValid: takeoffCG >= 35 && takeoffCG <= 47.3
     };
-  }, [emptyWeight, emptyArm, pilotWeight, rearWeight, fuelGals]);
+  }, [emptyWeight, emptyArm, pilotWeight, copilotWeight, rearPaxWeight, baggage1Weight, fuelGals]);
 
   const takeoffPerf = useMemo(() => {
     const baseRoll = 950;
     const baseTotal = 1650;
     const da = densityAlt;
-    const w = parseFloat(weight);
+    const w = wbResults.takeoff.weight;
     const hw = parseFloat(headwindInput);
-    if (isNaN(w) || isNaN(hw)) return { roll: 0, total: 0, vr: 0 };
     const daFactor = 1 + (da / 1000) * 0.10;
     const weightFactor = 1 + ((w - 2300) / 100) * 0.10;
     const windFactor = hw >= 0 ? 1 - (hw / 9) * 0.10 : 1 + (Math.abs(hw) / 2) * 0.10;
-    const roll = baseRoll * daFactor * weightFactor * windFactor;
-    const total = baseTotal * daFactor * weightFactor * windFactor;
-    const vr = 55 * Math.sqrt(w / 2300);
-    return { roll: Math.round(roll), total: Math.round(total), vr: Math.round(vr) };
-  }, [densityAlt, weight, headwindInput]);
+    return { roll: Math.round(baseRoll * daFactor * weightFactor * windFactor), total: Math.round(baseTotal * daFactor * weightFactor * windFactor), vr: Math.round(55 * Math.sqrt(w / 2300)) };
+  }, [densityAlt, wbResults.takeoff.weight, headwindInput]);
+
+  const renderEnvelopeGraph = () => {
+    // Envelope coordinates for C172S (CG in inches, Weight in lbs)
+    const points = [
+      { x: 35.0, y: 1500 },
+      { x: 35.0, y: 1900 },
+      { x: 41.0, y: 2550 },
+      { x: 47.3, y: 2550 },
+      { x: 47.3, y: 1500 },
+      { x: 35.0, y: 1500 }
+    ];
+
+    const minX = 33, maxX = 50, minY = 1400, maxY = 2700;
+    const scaleX = (val: number) => ((val - minX) / (maxX - minX)) * 100;
+    const scaleY = (val: number) => 100 - (((val - minY) / (maxY - minY)) * 100);
+
+    const pathData = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(p.x)} ${scaleY(p.y)}`).join(' ');
+
+    return (
+      <div className="relative w-full aspect-square bg-slate-950 rounded-3xl border border-slate-800 p-4">
+        <svg viewBox="0 0 100 100" className="w-full h-full">
+          {/* Grid lines */}
+          {[1600, 1800, 2000, 2200, 2400, 2600].map(y => (
+            <line key={y} x1="0" y1={scaleY(y)} x2="100" y2={scaleY(y)} stroke="#1e293b" strokeWidth="0.5" />
+          ))}
+          {[35, 40, 45].map(x => (
+            <line key={x} x1={scaleX(x)} y1="0" x2={scaleX(x)} y2="100" stroke="#1e293b" strokeWidth="0.5" />
+          ))}
+          
+          {/* Envelope */}
+          <path d={pathData} fill="rgba(59, 130, 246, 0.1)" stroke="#3b82f6" strokeWidth="1" />
+          
+          {/* Takeoff Point */}
+          <circle cx={scaleX(wbResults.takeoff.cg)} cy={scaleY(wbResults.takeoff.weight)} r="2" fill="#10b981" />
+          <text x={scaleX(wbResults.takeoff.cg) + 3} y={scaleY(wbResults.takeoff.weight)} fontSize="3" fill="#10b981" fontWeight="bold">LOADING POINT</text>
+          
+          {/* Axes labels */}
+          <text x="50" y="98" fontSize="3" fill="#64748b" textAnchor="middle">CG (INCHES AFT DATUM)</text>
+          <text x="2" y="50" fontSize="3" fill="#64748b" textAnchor="middle" transform="rotate(-90 2 50)">WEIGHT (LBS)</text>
+        </svg>
+      </div>
+    );
+  };
 
   return (
     <div className="p-8 h-full overflow-y-auto max-w-7xl mx-auto custom-scrollbar">
@@ -163,7 +195,6 @@ const CalculatorView: React.FC = () => {
             { id: 'climb', icon: ArrowUpRight, label: 'Climb/Des' },
             { id: 'weight', icon: Scale, label: 'W&B' },
             { id: 'takeoff', icon: PlaneTakeoff, label: 'Takeoff' },
-            { id: 'landing', icon: PlaneLanding, label: 'Landing' },
             { id: 'performance', icon: Thermometer, label: 'Perf/DA' },
           ].map((tab) => (
             <button
@@ -171,7 +202,7 @@ const CalculatorView: React.FC = () => {
               onClick={() => setActiveTab(tab.id as TabType)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                 activeTab === tab.id 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                  ? 'bg-blue-600 text-white shadow-lg' 
                   : 'text-slate-500 hover:text-slate-200 hover:bg-slate-700'
               }`}
             >
@@ -183,6 +214,117 @@ const CalculatorView: React.FC = () => {
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+        {activeTab === 'weight' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Input Panel */}
+            <section className="lg:col-span-4 bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl space-y-6">
+              <h3 className="text-xs font-black text-blue-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                <Scale size={16} /> Load Manifest
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Aircraft Empty Weight</label>
+                  <input type="number" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                    <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Pilot (LBS)</label>
+                    <input type="number" value={pilotWeight} onChange={e => setPilotWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                  </div>
+                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                    <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Copilot (LBS)</label>
+                    <input type="number" value={copilotWeight} onChange={e => setCopilotWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Rear Passengers (Total LBS)</label>
+                  <input type="number" value={rearPaxWeight} onChange={e => setRearPaxWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                </div>
+
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Baggage Area (LBS)</label>
+                  <input type="number" value={baggage1Weight} onChange={e => setBaggage1Weight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                </div>
+
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                  <label className="block text-[9px] font-black text-slate-500 uppercase mb-1">Fuel Load (GAL)</label>
+                  <input type="number" value={fuelGals} onChange={e => setFuelGals(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
+                </div>
+              </div>
+            </section>
+
+            {/* Visual Panel */}
+            <section className="lg:col-span-5 flex flex-col gap-6">
+              <div className="bg-slate-800/40 border border-slate-700 p-8 rounded-[32px] shadow-xl">
+                 <h3 className="text-xs font-black text-emerald-500 uppercase tracking-widest mb-6 text-center">CG Envelope Visualization</h3>
+                 {renderEnvelopeGraph()}
+                 <div className="mt-6 flex justify-center gap-6">
+                   <div className="flex items-center gap-2">
+                     <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                     <span className="text-[10px] font-bold text-slate-400 uppercase">Current State</span>
+                   </div>
+                 </div>
+              </div>
+
+              {(wbResults.isOverWeight || !wbResults.isCGValid) && (
+                <div className="bg-red-500/10 border border-red-500/20 p-6 rounded-[32px] flex items-center gap-4 animate-bounce">
+                  <AlertTriangle className="text-red-500 flex-shrink-0" size={32} />
+                  <div>
+                    <h4 className="text-sm font-black text-red-500 uppercase tracking-widest">Safety Alert</h4>
+                    <p className="text-xs text-red-400 font-medium">Aircraft state is outside certified operational limits. Adjust loading before takeoff.</p>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Results Panel */}
+            <section className="lg:col-span-3 space-y-4">
+              <div className="bg-slate-900 border border-slate-800 p-6 rounded-[32px] shadow-xl">
+                <div className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-4">Weight & Balance Configuration</div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[9px] font-bold text-slate-500 uppercase">Gross Weight</div>
+                    <div className={`text-3xl font-mono font-bold ${wbResults.isOverWeight ? 'text-red-500' : 'text-white'}`}>
+                      {wbResults.takeoff.weight} <span className="text-xs">LBS</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-bold text-slate-500 uppercase">CG Location</div>
+                    <div className={`text-3xl font-mono font-bold ${!wbResults.isCGValid ? 'text-red-500' : 'text-emerald-400'}`}>
+                      {wbResults.takeoff.cg}"
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/20 border border-slate-800 p-6 rounded-[32px] space-y-4">
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase">
+                  <span>Zero Fuel Weight</span>
+                  <span className="font-mono text-white">{wbResults.zero.weight} LBS</span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase">
+                  <span>Zero Fuel CG</span>
+                  <span className="font-mono text-white">{wbResults.zero.cg}"</span>
+                </div>
+              </div>
+
+              <div className="p-6 bg-blue-600/5 border border-blue-500/10 rounded-3xl">
+                <div className="flex gap-3 mb-2">
+                  <Info size={16} className="text-blue-500 flex-shrink-0" />
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pilot Reference</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  Based on C172S profile. Max Ramp: 2558 lbs. Max Takeoff: 2550 lbs. Always consult the POH for your specific tail number.
+                </p>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* Navigation Planning */}
         {activeTab === 'nav' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <section className="bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl space-y-6">
@@ -206,54 +348,58 @@ const CalculatorView: React.FC = () => {
             </section>
             
             <section className="space-y-6">
-              <div className="bg-slate-800/40 border border-slate-700 p-8 rounded-[32px] shadow-xl text-center">
-                <div className="grid grid-cols-2 gap-8">
-                  <div>
-                    <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Estimated Time</div>
-                    <div className="text-5xl font-mono font-bold text-white">{navResults.timeMin} <span className="text-sm">MIN</span></div>
+              <div className="bg-slate-800/40 border border-slate-700 p-8 rounded-[32px] shadow-xl">
+                <div className="grid grid-cols-2 gap-8 mb-8">
+                  <div className="text-center">
+                    <div className="text-[10px] font-black text-slate-500 uppercase mb-2">ETE (HH:MM)</div>
+                    <div className="text-5xl font-mono font-bold text-white">{navResults.ete}</div>
                   </div>
-                  <div>
+                  <div className="text-center">
                     <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Fuel Required</div>
                     <div className="text-5xl font-mono font-bold text-amber-500">{navResults.fuelReq} <span className="text-sm">GAL</span></div>
                   </div>
                 </div>
-              </div>
-              <div className="p-6 bg-blue-600/5 border border-blue-500/10 rounded-3xl flex gap-4">
-                <Info size={24} className="text-blue-500 flex-shrink-0" />
-                <p className="text-xs text-slate-400 leading-relaxed font-medium">
-                  Calculation based on constant ground speed. For more precision, use the <button onClick={() => setActiveTab('wind')} className="text-blue-400 font-bold hover:underline">Wind Triangle</button> to derive ground speed from TAS and winds aloft.
-                </p>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center">
+                    <div className="flex items-center justify-center gap-2 text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">
+                      <Clock size={12} /> ETA (Local)
+                    </div>
+                    <div className="text-3xl font-mono font-bold text-white">{navResults.eta}</div>
+                  </div>
+                  <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center">
+                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Mins</div>
+                    <div className="text-3xl font-mono font-bold text-slate-300">{navResults.timeMin}</div>
+                  </div>
+                </div>
               </div>
             </section>
           </div>
         )}
 
+        {/* Wind Triangle */}
         {activeTab === 'wind' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <section className="bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl space-y-6">
               <h3 className="text-xs font-black text-blue-500 uppercase tracking-widest flex items-center gap-2">
                 <Navigation2 size={16} /> Wind Triangle Solver
               </h3>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">True Course (°T)</label>
-                    <input type="number" value={course} onChange={e => setCourse(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">True Airspeed (TAS)</label>
-                    <input type="number" value={tas} onChange={e => setTas(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                  </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">True Course (°T)</label>
+                  <input type="number" value={course} onChange={e => setCourse(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Wind Dir (°T)</label>
-                    <input type="number" value={windDir} onChange={e => setWindDir(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Wind Speed (KTS)</label>
-                    <input type="number" value={windSpeed} onChange={e => setWindSpeed(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">True Airspeed (TAS)</label>
+                  <input type="number" value={tas} onChange={e => setTas(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Wind Dir (°T)</label>
+                  <input type="number" value={windDir} onChange={e => setWindDir(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Wind Speed (KTS)</label>
+                  <input type="number" value={windSpeed} onChange={e => setWindSpeed(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
                 </div>
               </div>
             </section>
@@ -274,110 +420,12 @@ const CalculatorView: React.FC = () => {
                   <span className="text-xs font-bold text-slate-400 uppercase">Crosswind Component</span>
                   <span className="font-mono text-xl font-bold text-amber-500">{Math.abs(windResults.crosswind)} KTS</span>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl">
-                  <span className="text-xs font-bold text-slate-400 uppercase">{windResults.headwind >= 0 ? 'Headwind' : 'Tailwind'} Component</span>
-                  <span className={`font-mono text-xl font-bold ${windResults.headwind >= 0 ? 'text-blue-400' : 'text-emerald-400'}`}>
-                    {Math.abs(windResults.headwind)} KTS
-                  </span>
-                </div>
               </div>
             </section>
           </div>
         )}
 
-        {activeTab === 'climb' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <section className="bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl space-y-6">
-              <h3 className="text-xs font-black text-blue-500 uppercase tracking-widest flex items-center gap-2">
-                <ArrowUpRight size={16} /> Vertical Profiles
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">From Alt (FT)</label>
-                  <input type="number" value={startAlt} onChange={e => setStartAlt(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">To Alt (FT)</label>
-                  <input type="number" value={targetAlt} onChange={e => setTargetAlt(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Rate (FPM)</label>
-                  <input type="number" value={verticalSpeed} onChange={e => setVerticalSpeed(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Gnd Speed (KTS)</label>
-                  <input type="number" value={groundSpeedCD} onChange={e => setGroundSpeedCD(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
-                </div>
-              </div>
-            </section>
-            
-            <section className="bg-slate-800/40 border border-slate-700 p-8 rounded-[32px] shadow-xl flex flex-col justify-center">
-              <div className="text-center space-y-8">
-                <div>
-                  <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Time Required</div>
-                  <div className="text-5xl font-mono font-bold text-white">{cdResults.time} <span className="text-sm">MIN</span></div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Distance Over Ground</div>
-                  <div className="text-5xl font-mono font-bold text-blue-400">{cdResults.dist} <span className="text-sm">NM</span></div>
-                </div>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'weight' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-             <section className="lg:col-span-2 bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl">
-               <h3 className="text-xs font-black text-blue-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                 <Scale size={16} /> Loading Manifest (Cessna 172 Pattern)
-               </h3>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Basic Empty Weight (LBS)</label>
-                    <input type="number" value={emptyWeight} onChange={e => setEmptyWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
-                  </div>
-                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Front Seat Weight (LBS)</label>
-                    <input type="number" value={pilotWeight} onChange={e => setPilotWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
-                  </div>
-                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Rear Seat/Baggage (LBS)</label>
-                    <input type="number" value={rearWeight} onChange={e => setRearWeight(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
-                  </div>
-                  <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Fuel Load (Gallons)</label>
-                    <input type="number" value={fuelGals} onChange={e => setFuelGals(e.target.value)} className="w-full bg-transparent border-none outline-none font-mono text-xl text-slate-100" />
-                  </div>
-               </div>
-             </section>
-
-             <section className="space-y-6">
-                <div className="bg-slate-800/40 border border-slate-700 p-8 rounded-[32px] shadow-xl text-center">
-                   <div className="space-y-8">
-                     <div>
-                       <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Gross Weight</div>
-                       <div className="text-4xl font-mono font-bold text-white">{wbResults.weight} <span className="text-xs">LBS</span></div>
-                     </div>
-                     <div>
-                       <div className="text-[10px] font-black text-slate-500 uppercase mb-2">Center of Gravity</div>
-                       <div className="text-4xl font-mono font-bold text-emerald-400">{wbResults.cg} <span className="text-xs">IN</span></div>
-                     </div>
-                   </div>
-                </div>
-                {wbResults.weight > 2400 && (
-                   <div className="bg-red-500/10 border border-red-500/20 p-6 rounded-[32px] flex gap-4">
-                      <AlertTriangle size={24} className="text-red-500 flex-shrink-0" />
-                      <p className="text-xs text-red-400 font-bold leading-relaxed uppercase tracking-widest">
-                        Exceeds Max Gross Weight!
-                      </p>
-                   </div>
-                )}
-             </section>
-          </div>
-        )}
-
-        {/* Existing Performance / Takeoff / Landing tabs can be kept or slightly refined similarly */}
+        {/* Takeoff Performance */}
         {activeTab === 'takeoff' && (
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <section className="bg-slate-900/60 border border-slate-800 p-8 rounded-[32px] shadow-xl space-y-6">
@@ -395,9 +443,9 @@ const CalculatorView: React.FC = () => {
                         <input type="number" value={oat} onChange={e => setOat(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Takeoff Weight (LBS)</label>
-                      <input type="number" value={weight} onChange={e => setWeight(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xl text-blue-100 outline-none" />
+                    <div className="p-4 bg-slate-800/40 rounded-2xl border border-slate-700 flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">Gross Weight</span>
+                      <span className="font-mono text-blue-100">{wbResults.takeoff.weight} LBS</span>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Headwind (KTS)</label>
@@ -420,14 +468,14 @@ const CalculatorView: React.FC = () => {
            </div>
         )}
 
-        {/* Catch-all for other tabs or refinement */}
+        {/* Performance (Pressure Alt) */}
         {activeTab === 'performance' && (
            <div className="max-w-2xl mx-auto">
              <section className="bg-slate-900/60 border border-slate-800 p-12 rounded-[48px] shadow-2xl text-center">
                <div className="bg-blue-600/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 border border-blue-500/20">
                  <Thermometer size={48} className="text-blue-500" />
                </div>
-               <h3 className="text-lg font-black text-slate-300 uppercase tracking-[0.2em] mb-8">Atmospheric Physics</h3>
+               <h3 className="text-lg font-black text-slate-300 uppercase tracking-[0.2em] mb-8">Atmospheric Pressure</h3>
                <div className="grid grid-cols-2 gap-8 mb-12">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Press Alt</label>

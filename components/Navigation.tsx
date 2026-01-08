@@ -12,18 +12,20 @@ import {
 } from 'lucide-react';
 import { ViewMode } from '../types';
 
+type AppTheme = 'light' | 'dark';
+
 interface NavigationProps {
   currentView: ViewMode;
   setView: (view: ViewMode) => void;
-  nightMode: boolean;
-  toggleNightMode: () => void;
+  currentTheme: AppTheme;
+  setTheme: (theme: AppTheme) => void;
 }
 
 const Navigation: React.FC<NavigationProps> = ({ 
   currentView, 
   setView, 
-  nightMode, 
-  toggleNightMode 
+  currentTheme,
+  setTheme 
 }) => {
   const navItems = [
     { id: ViewMode.MAP, icon: MapIcon, label: 'Charts' },
@@ -33,13 +35,19 @@ const Navigation: React.FC<NavigationProps> = ({
     { id: ViewMode.CHECKPOINTS, icon: History, label: 'Logbook' },
   ];
 
+  const cycleTheme = () => {
+    setTheme(currentTheme === 'light' ? 'dark' : 'light');
+  };
+
+  const isLight = currentTheme === 'light';
+
   return (
-    <nav className="w-20 md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-full transition-all duration-300">
+    <nav className={`w-20 md:w-64 border-r flex flex-col h-full transition-all duration-300 ${isLight ? 'bg-white border-slate-200 shadow-xl' : 'bg-slate-900 border-slate-800'}`}>
       <div className="p-6 flex items-center gap-3">
-        <div className="bg-blue-600 p-2 rounded-lg">
+        <div className="bg-blue-600 p-2 rounded-lg shadow-lg">
           <Plane className="text-white w-6 h-6" />
         </div>
-        <h1 className="text-xl font-bold hidden md:block tracking-tight">
+        <h1 className={`text-xl font-bold hidden md:block tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
           Sky<span className="text-blue-500">Nav</span>
         </h1>
       </div>
@@ -51,24 +59,34 @@ const Navigation: React.FC<NavigationProps> = ({
             onClick={() => setView(item.id)}
             className={`w-full flex items-center gap-4 p-3 rounded-xl transition-all ${
               currentView === item.id 
-                ? 'bg-blue-600/20 text-blue-400 border border-blue-600/30' 
-                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                : isLight 
+                  ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
             }`}
           >
             <item.icon size={24} />
-            <span className="font-medium hidden md:block">{item.label}</span>
+            <span className="font-bold text-xs uppercase tracking-widest hidden md:block">{item.label}</span>
           </button>
         ))}
       </div>
 
-      <div className="p-4 border-t border-slate-800">
+      <div className={`p-4 border-t ${isLight ? 'border-slate-100' : 'border-slate-800'}`}>
         <button
-          onClick={toggleNightMode}
-          className="w-full flex items-center justify-center md:justify-start gap-4 p-3 rounded-xl text-slate-400 hover:bg-slate-800 transition-all"
+          onClick={cycleTheme}
+          className={`w-full flex items-center justify-center md:justify-start gap-4 p-3 rounded-xl transition-all ${
+            isLight 
+              ? 'text-slate-500 hover:bg-slate-100 hover:text-slate-900' 
+              : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+          }`}
         >
-          {nightMode ? <Sun size={24} /> : <Moon size={24} />}
-          <span className="font-medium hidden md:block">
-            {nightMode ? 'Day Mode' : 'Night Vision'}
+          {currentTheme === 'light' ? (
+            <Sun size={24} className="text-amber-500" />
+          ) : (
+            <Moon size={24} className="text-blue-400" />
+          )}
+          <span className="font-bold text-xs uppercase tracking-widest hidden md:block">
+            {currentTheme === 'light' ? 'Day Mode' : 'Night Mode'}
           </span>
         </button>
       </div>

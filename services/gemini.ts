@@ -1,10 +1,10 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Airport, Message } from "../types.ts";
 
 /**
  * Helper to ensure we always have a valid AI client.
- * We initialize it inside a function to avoid potential top-level reference errors 
- * in certain ESM environments during app startup.
+ * We create a new instance right before the call to ensure it uses the latest API key.
  */
 const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
@@ -31,12 +31,13 @@ export const interpretWeather = async (metar: string): Promise<string> => {
 export const getLiveAirportInfo = async (icao: string): Promise<{ text: string, links: { title: string, uri: string }[] }> => {
   try {
     const ai = getAiClient();
+    // Using gemini-3-flash-preview for search grounding as per recommended basic text/grounding tasks
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `What are the current operational status, active NOTAMs, or significant delays at ${icao} airport right now? Provide a concise summary for a pilot.`,
       config: {
         tools: [{ googleSearch: {} }],
-        systemInstruction: "You are a Flight Operations Officer. Provide highly accurate, real-time airport status updates for pilots.",
+        systemInstruction: "You are a Flight Operations Officer. Provide highly accurate, real-time airport status updates for pilots based on current information.",
       }
     });
 
@@ -51,8 +52,26 @@ export const getLiveAirportInfo = async (icao: string): Promise<{ text: string, 
       }));
 
     return { text, links };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Grounding search failed:", error);
+    
+    // Check if it's a permission error or model/entity not found
+    const errorMsg = error?.message || "";
+    if (errorMsg.includes("403") || errorMsg.includes("PERMISSION_DENIED")) {
+      return { 
+        text: "Access Denied: Google Search tool requires a paid API key from a project with the tool enabled. Please ensure your billing project is correctly configured.", 
+        links: [] 
+      };
+    }
+    
+    if (errorMsg.includes("Requested entity was not found")) {
+      // This is a specific signal for key selection issues
+      return { 
+        text: "Configuration Error: API project not found. Please re-select your API key.", 
+        links: [] 
+      };
+    }
+
     return { text: "Real-time search unavailable. Check official FAA/NOTAM portals.", links: [] };
   }
 };
@@ -61,7 +80,7 @@ export const searchAirport = async (query: string): Promise<Airport | null> => {
   try {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       contents: `Find details for airport: ${query}. Return JSON with icao, name, lat, lng, elev, runways (array of objects with ident, length, width, surface).`,
       config: {
         responseMimeType: "application/json",
@@ -106,7 +125,7 @@ export const chatWithCopilot = async (history: Message[]): Promise<string> => {
   try {
     const ai = getAiClient();
     const chat = ai.chats.create({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       config: {
         systemInstruction: "You are an expert AI Copilot for pilots. Assist with aviation-related queries including weather (METAR/TAF), flight calculations, regulations (FAR/AIM), and navigation. Be professional, concise, and prioritize safety.",
       },

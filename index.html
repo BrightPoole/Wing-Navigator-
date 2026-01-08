@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,12 +11,27 @@
     <style>
       @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap');
       
+      :root {
+        --bg-app: #0f172a;
+        --text-app: #f8fafc;
+        --border-app: #1e293b;
+        --bg-panel: #1e293b;
+      }
+
+      .theme-light {
+        --bg-app: #ffffff;
+        --text-app: #0f172a;
+        --border-app: #e2e8f0;
+        --bg-panel: #f8fafc;
+      }
+
       body {
         font-family: 'Inter', sans-serif;
-        background-color: #0f172a;
-        color: #f8fafc;
+        background-color: var(--bg-app);
+        color: var(--text-app);
         margin: 0;
         overflow: hidden;
+        transition: background-color 0.3s ease, color 0.3s ease;
       }
 
       .font-mono {
@@ -23,7 +39,7 @@
       }
 
       .leaflet-container {
-        background: #1e293b !important;
+        background: var(--bg-panel) !important;
       }
 
       /* Custom Scrollbar */
@@ -31,34 +47,32 @@
         width: 6px;
       }
       ::-webkit-scrollbar-track {
-        background: #0f172a;
+        background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #334155;
+        background: #94a3b8;
         border-radius: 10px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #475569;
+        background: #64748b;
       }
-
-      .night-mode {
-        filter: sepia(100%) hue-rotate(-50deg) saturate(300%) contrast(120%);
-      }
+      
+      .theme-light .bg-slate-900 { background-color: #f1f5f9 !important; }
+      .theme-light .bg-slate-950 { background-color: #ffffff !important; }
+      .theme-light .border-slate-800 { border-color: #e2e8f0 !important; }
+      .theme-light .border-slate-700 { border-color: #cbd5e1 !important; }
+      .theme-light .text-slate-400 { color: #64748b !important; }
+      .theme-light .text-slate-500 { color: #475569 !important; }
+      .theme-light .text-slate-50 { color: #0f172a !important; }
+      .theme-light .text-slate-300 { color: #1e293b !important; }
+      .theme-light .bg-slate-800\/40 { background-color: rgba(241, 245, 249, 0.6) !important; }
     </style>
     <script>
-      /**
-       * Crucial shim for process.env.
-       * In many browser environments (like Vercel deployments), process.env is 
-       * expected by libraries but not defined. We set a safe default.
-       */
       window.process = window.process || { 
-        env: { 
-          API_KEY: "" 
-        },
+        env: { API_KEY: "" },
         version: 'v1.0.0',
         nextTick: (cb) => setTimeout(cb, 0)
       };
-      // Ensure globalThis also has access to it for wide compatibility
       if (typeof globalThis !== 'undefined' && !globalThis.process) {
         globalThis.process = window.process;
       }
@@ -78,7 +92,7 @@
 }
 </script>
 </head>
-<body>
+<body class="theme-light">
     <div id="root"></div>
     <script type="module" src="index.tsx"></script>
 </body>

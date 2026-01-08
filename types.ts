@@ -67,4 +67,5 @@ export interface Checkpoint {
   mapCenter?: [number, number];
   mapZoom?: number;
   checklistState: ChecklistGroup[];
+  flightPlan: Airport[];
 }

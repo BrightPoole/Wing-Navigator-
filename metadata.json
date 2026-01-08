@@ -1,0 +1,7 @@
+{
+  "name": "SkyNav Pilot Browser",
+  "description": "A comprehensive cockpit companion for pilots featuring real-time METAR/TAF weather, E6B aviation calculators, interactive checklists, and an AI copilot powered by Gemini.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

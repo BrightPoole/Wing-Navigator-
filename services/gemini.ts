@@ -1,11 +1,18 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Airport, Message } from "../types.ts";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+/**
+ * Helper to ensure we always have a valid AI client.
+ * We initialize it inside a function to avoid potential top-level reference errors 
+ * in certain ESM environments during app startup.
+ */
+const getAiClient = () => {
+  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+};
 
 export const interpretWeather = async (metar: string): Promise<string> => {
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Interpret this METAR for a pilot: ${metar}`,
@@ -16,12 +23,14 @@ export const interpretWeather = async (metar: string): Promise<string> => {
     
     return response.text || "Unable to decode METAR.";
   } catch (error) {
+    console.error("Gemini interpretation failed:", error);
     return "Weather interpretation service unavailable.";
   }
 };
 
 export const getLiveAirportInfo = async (icao: string): Promise<{ text: string, links: { title: string, uri: string }[] }> => {
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `What are the current operational status, active NOTAMs, or significant delays at ${icao} airport right now? Provide a concise summary for a pilot.`,
@@ -50,6 +59,7 @@ export const getLiveAirportInfo = async (icao: string): Promise<{ text: string, 
 
 export const searchAirport = async (query: string): Promise<Airport | null> => {
   try {
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `Find details for airport: ${query}. Return JSON with icao, name, lat, lng, elev, runways (array of objects with ident, length, width, surface).`,
@@ -94,6 +104,7 @@ export const searchAirport = async (query: string): Promise<Airport | null> => {
 
 export const chatWithCopilot = async (history: Message[]): Promise<string> => {
   try {
+    const ai = getAiClient();
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview',
       config: {

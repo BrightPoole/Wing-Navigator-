@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -47,15 +46,20 @@
       }
     </style>
     <script>
-      // Enhanced shim for process.env to prevent ReferenceErrors in browser ESM environments
-      window.process = { 
+      /**
+       * Crucial shim for process.env.
+       * In many browser environments (like Vercel deployments), process.env is 
+       * expected by libraries but not defined. We set a safe default.
+       */
+      window.process = window.process || { 
         env: { 
           API_KEY: "" 
         },
         version: 'v1.0.0',
         nextTick: (cb) => setTimeout(cb, 0)
       };
-      if (typeof globalThis !== 'undefined') {
+      // Ensure globalThis also has access to it for wide compatibility
+      if (typeof globalThis !== 'undefined' && !globalThis.process) {
         globalThis.process = window.process;
       }
     </script>

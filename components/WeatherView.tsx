@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Search, Wind, Cloud, MapPin, Loader2, FileText } from 'lucide-react';
-import { interpretWeather } from '../services/gemini';
+import { interpretWeather } from '../services/gemini.ts';
 
 const WeatherView: React.FC = () => {
   const [icao, setIcao] = useState('');

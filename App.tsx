@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import Navigation from './components/Navigation';
-import MapContainer from './components/MapContainer';
-import WeatherView from './components/WeatherView';
-import CalculatorView from './components/CalculatorView';
-import ChecklistView from './components/ChecklistView';
-import CheckpointView from './components/CheckpointView';
-import { ViewMode, Checkpoint, ChecklistGroup } from './types';
-import { PREFLIGHT_CHECKLIST } from './constants';
+import Navigation from './components/Navigation.tsx';
+import MapContainer from './components/MapContainer.tsx';
+import WeatherView from './components/WeatherView.tsx';
+import CalculatorView from './components/CalculatorView.tsx';
+import ChecklistView from './components/ChecklistView.tsx';
+import CheckpointView from './components/CheckpointView.tsx';
+import { ViewMode, Checkpoint, ChecklistGroup } from './types.ts';
+import { PREFLIGHT_CHECKLIST } from './constants.ts';
 import { Flag, RotateCcw } from 'lucide-react';
 
 const STORAGE_KEY = 'skynav_checkpoints';

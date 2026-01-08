@@ -26,9 +26,9 @@ import {
   Radio,
   MoveUpRight
 } from 'lucide-react';
-import { MAJOR_AIRPORTS, MOCK_SIGMETS, MOCK_AIRMETS } from '../constants';
-import { searchAirport, interpretWeather, getLiveAirportInfo } from '../services/gemini';
-import { Airport, WeatherHazard } from '../types';
+import { MAJOR_AIRPORTS, MOCK_SIGMETS, MOCK_AIRMETS } from '../constants.ts';
+import { searchAirport, interpretWeather, getLiveAirportInfo } from '../services/gemini.ts';
+import { Airport, WeatherHazard } from '../types.ts';
 
 declare const L: any;
 

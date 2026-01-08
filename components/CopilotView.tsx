@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, Info } from 'lucide-react';
-import { chatWithCopilot } from '../services/gemini';
-import { Message } from '../types';
+import { chatWithCopilot } from '../services/gemini.ts';
+import { Message } from '../types.ts';
 
 const CopilotView: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([

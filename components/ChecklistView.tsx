@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { PREFLIGHT_CHECKLIST } from '../constants';
-import { ChecklistGroup, ChecklistItem } from '../types';
+import { PREFLIGHT_CHECKLIST } from '../constants.ts';
+import { ChecklistGroup, ChecklistItem } from '../types.ts';
 import { CheckCircle2, Circle, RotateCcw, Plus, PlusCircle, Trash2, X } from 'lucide-react';
 
 const ChecklistView: React.FC = () => {

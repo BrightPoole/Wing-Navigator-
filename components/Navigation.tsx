@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { 
   Map as MapIcon, 
@@ -48,7 +47,7 @@ const Navigation: React.FC<NavigationProps> = ({
           <Plane className="text-white w-6 h-6" />
         </div>
         <h1 className={`text-xl font-bold hidden md:block tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
-          Sky<span className="text-blue-500">Nav</span>
+          Wing<span className="text-blue-500"> Navigator</span>
         </h1>
       </div>
 

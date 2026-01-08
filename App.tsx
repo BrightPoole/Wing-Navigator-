@@ -13,7 +13,7 @@ import { Flag, RotateCcw, Key, ExternalLink, ShieldAlert } from 'lucide-react';
 const STORAGE_KEY = 'skynav_checkpoints';
 const CHECKLIST_KEY = 'skynav_checklist_state';
 const FLIGHTPLAN_KEY = 'skynav_flightplan_state';
-const PINNED_KEY = 'skynav_pinned_airports';
+const TERMINALS_KEY = 'skynav_terminal_airports';
 const THEME_KEY = 'skynav_theme';
 
 type AppTheme = 'light' | 'dark';
@@ -40,9 +40,9 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Global Pinned (searched) Airports
-  const [pinnedAirports, setPinnedAirports] = useState<Airport[]>(() => {
-    const saved = localStorage.getItem(PINNED_KEY);
+  // Global Terminal (searched) Airports
+  const [terminalAirports, setTerminalAirports] = useState<Airport[]>(() => {
+    const saved = localStorage.getItem(TERMINALS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -86,8 +86,8 @@ const App: React.FC = () => {
   }, [flightPlan]);
 
   useEffect(() => {
-    localStorage.setItem(PINNED_KEY, JSON.stringify(pinnedAirports));
-  }, [pinnedAirports]);
+    localStorage.setItem(TERMINALS_KEY, JSON.stringify(terminalAirports));
+  }, [terminalAirports]);
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
@@ -133,8 +133,8 @@ const App: React.FC = () => {
             theme={theme} 
             flightPlan={flightPlan} 
             setFlightPlan={setFlightPlan}
-            pinnedAirports={pinnedAirports}
-            setPinnedAirports={setPinnedAirports}
+            terminalAirports={terminalAirports}
+            setTerminalAirports={setTerminalAirports}
           />
         );
       case ViewMode.WEATHER:
@@ -157,8 +157,8 @@ const App: React.FC = () => {
             theme={theme} 
             flightPlan={flightPlan} 
             setFlightPlan={setFlightPlan} 
-            pinnedAirports={pinnedAirports}
-            setPinnedAirports={setPinnedAirports}
+            terminalAirports={terminalAirports}
+            setTerminalAirports={setTerminalAirports}
           />
         );
     }

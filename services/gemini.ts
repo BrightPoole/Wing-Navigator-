@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Airport, Message } from "../types.ts";
 
@@ -7,7 +6,8 @@ import { Airport, Message } from "../types.ts";
  * We create a new instance right before the call to ensure it uses the latest API key.
  */
 const getAiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always initialize with process.env.API_KEY directly as per naming conventions
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const interpretWeather = async (metar: string): Promise<string> => {

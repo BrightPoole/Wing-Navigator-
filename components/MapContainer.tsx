@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { 
   Search, 
@@ -28,7 +27,15 @@ import {
   Save,
   FolderOpen,
   Check,
-  Download
+  Download,
+  History,
+  Target,
+  Layout,
+  Zap,
+  ArrowUp,
+  Link as LinkIcon,
+  RefreshCw,
+  Cloud
 } from 'lucide-react';
 import { MAJOR_AIRPORTS, MOCK_SIGMETS, MOCK_AIRMETS } from '../constants.ts';
 import { searchAirport, interpretWeather, getLiveAirportInfo } from '../services/gemini.ts';
@@ -51,12 +58,32 @@ const getDistanceNM = (lat1: number, lon1: number, lat2: number, lon2: number) =
   return R * c;
 };
 
+// Helper to extract wind from METAR
+const parseWind = (metar: string | null) => {
+  if (!metar) return null;
+  const match = metar.match(/\s(\d{3})(\d{2,3})(G\d{2,3})?KT/);
+  if (match) {
+    return {
+      dir: parseInt(match[1]),
+      speed: parseInt(match[2]),
+      gust: match[3] ? parseInt(match[3].substring(1)) : null
+    };
+  }
+  return null;
+};
+
+// Helper to get heading from runway ident
+const getRwyHeading = (ident: string) => {
+  const match = ident.match(/^(\d{2})/);
+  return match ? parseInt(match[1]) * 10 : null;
+};
+
 interface MapContainerProps {
   theme?: 'light' | 'dark';
   flightPlan: Airport[];
   setFlightPlan: React.Dispatch<React.SetStateAction<Airport[]>>;
-  pinnedAirports: Airport[];
-  setPinnedAirports: React.Dispatch<React.SetStateAction<Airport[]>>;
+  terminalAirports: Airport[];
+  setTerminalAirports: React.Dispatch<React.SetStateAction<Airport[]>>;
 }
 
 interface SavedPlan {
@@ -65,7 +92,7 @@ interface SavedPlan {
   timestamp: number;
 }
 
-const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan, setFlightPlan, pinnedAirports, setPinnedAirports }) => {
+const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan, setFlightPlan, terminalAirports, setTerminalAirports }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markersRef = useRef<{ [key: string]: any }>({});
@@ -77,6 +104,7 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
   const [isSearching, setIsSearching] = useState(false);
   const [showWeatherControls, setShowWeatherControls] = useState(false);
   const [showFlightPlan, setShowFlightPlan] = useState(false);
+  const [showTerminals, setShowTerminals] = useState(false);
   const [showSavedPlans, setShowSavedPlans] = useState(false);
   
   const [selectedAirport, setSelectedAirport] = useState<Airport | null>(null);
@@ -89,14 +117,11 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
   const [isIntelLoading, setIsIntelLoading] = useState(false);
   
   const [groundSpeed, setGroundSpeed] = useState(120);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>(() => {
     const saved = localStorage.getItem(SAVED_PLANS_KEY);
     return saved ? JSON.parse(saved) : [];
   });
-  const [planName, setPlanName] = useState('');
-  const [isSavingPlan, setIsSavingPlan] = useState(false);
 
   const [weatherConfig, setWeatherConfig] = useState({
     satellite: false,
@@ -144,7 +169,6 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
 
     const marker = L.marker([apt.lat, apt.lng], { icon: markerIcon }).addTo(mapInstance.current);
     
-    // Quick Add Popup
     const popupContent = document.createElement('div');
     popupContent.className = 'p-2 text-center';
     popupContent.innerHTML = `
@@ -184,7 +208,9 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
     }
     try {
       const now = new Date();
-      const mockMetar = `${apt.icao} ${now.getUTCDate()}${now.getUTCHours()}${now.getUTCMinutes()}Z 24012KT 10SM SCT030 OVC080 15/10 A2992 RMK AO2`;
+      const windDeg = Math.floor(Math.random() * 36) * 10;
+      const windSpeed = 8 + Math.floor(Math.random() * 10);
+      const mockMetar = `${apt.icao} ${now.getUTCDate()}${now.getUTCHours()}${now.getUTCMinutes()}Z ${windDeg.toString().padStart(3, '0')}${windSpeed}KT 10SM SCT030 OVC080 15/10 A2992 RMK AO2`;
       setRawMetar(mockMetar);
       
       const interpretation = await interpretWeather(mockMetar);
@@ -212,9 +238,23 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
     setRawMetar(null);
     setLiveIntel(null);
     fetchAirportWeather(apt);
+    
+    if (mapInstance.current) {
+      mapInstance.current.flyTo([apt.lat, apt.lng], 10, { animate: true, duration: 1.5 });
+    }
   }, [fetchAirportWeather]);
 
-  // Initial Map Setup
+  // Weather Auto-update timer logic
+  useEffect(() => {
+    let interval: any;
+    if (selectedAirport && weatherConfig.autoUpdate) {
+      interval = setInterval(() => {
+        fetchAirportWeather(selectedAirport, true);
+      }, REFRESH_INTERVAL);
+    }
+    return () => clearInterval(interval);
+  }, [selectedAirport, weatherConfig.autoUpdate, fetchAirportWeather]);
+
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
 
@@ -226,11 +266,11 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
     
     mapInstance.current = map;
 
-    const tileUrl = theme === 'dark' 
+    const initialTileUrl = theme === 'dark' 
       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
       : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 
-    layersRef.current.base = L.tileLayer(tileUrl).addTo(map);
+    layersRef.current.base = L.tileLayer(initialTileUrl).addTo(map);
 
     layersRef.current.vfr = L.tileLayer('https://tiles.arcgis.com/tiles/ssU2qS7qELu60V4p/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}');
     layersRef.current.ifrLow = L.tileLayer('https://tiles.arcgis.com/tiles/ssU2qS7qELu60V4p/arcgis/rest/services/IFR_Low_Enroute/MapServer/tile/{z}/{y}/{x}');
@@ -248,19 +288,24 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
         markersRef.current = {};
       }
     };
+  }, []);
+
+  useEffect(() => {
+    if (mapInstance.current && layersRef.current.base) {
+      const newUrl = theme === 'dark' 
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+      layersRef.current.base.setUrl(newUrl);
+    }
   }, [theme]);
 
-  // Bring back all pinpointed airports (Major + Flight Plan + Pinned Searched)
   useEffect(() => {
     if (isMapReady) {
-      // Add major hubs
       MAJOR_AIRPORTS.forEach(apt => addAirportMarker(apt));
-      // Add previously pinned/searched airports
-      pinnedAirports.forEach(apt => addAirportMarker(apt));
-      // Add mission-critical airports from flight plan
+      terminalAirports.forEach(apt => addAirportMarker(apt));
       flightPlan.forEach(apt => addAirportMarker(apt));
     }
-  }, [isMapReady, addAirportMarker, flightPlan, pinnedAirports]);
+  }, [isMapReady, addAirportMarker, flightPlan, terminalAirports]);
 
   useEffect(() => {
     if (!mapInstance.current || !isMapReady) return;
@@ -308,6 +353,31 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
     }
   }, [weatherConfig, isMapReady]);
 
+  const windData = useMemo(() => parseWind(rawMetar), [rawMetar]);
+
+  const activeRwy = useMemo(() => {
+    if (!selectedAirport?.runways || !windData) return null;
+
+    let bestRwy = null;
+    let minDiff = 181;
+
+    selectedAirport.runways.forEach(rwy => {
+      const idents = rwy.ident.split('/');
+      idents.forEach(ident => {
+        const heading = getRwyHeading(ident);
+        if (heading !== null) {
+          let diff = Math.abs(windData.dir - heading);
+          if (diff > 180) diff = 360 - diff;
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestRwy = ident;
+          }
+        }
+      });
+    });
+    return bestRwy;
+  }, [selectedAirport, windData]);
+
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim() || isSearching) return;
@@ -315,10 +385,9 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
     try {
       const airport = await searchAirport(searchQuery);
       if (airport) {
-        // Automatically pin the searched airport
-        setPinnedAirports(prev => {
+        setTerminalAirports(prev => {
           if (prev.some(a => a.icao === airport.icao)) return prev;
-          return [...prev, airport];
+          return [airport, ...prev];
         });
         addAirportMarker(airport, true);
         handleAirportClick(airport);
@@ -342,81 +411,49 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
 
   const isLight = theme === 'light';
 
-  // Drag and Drop Handlers
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
+  const deleteTerminal = (icao: string) => {
+    setTerminalAirports(prev => prev.filter(p => p.icao !== icao));
+    if (markersRef.current[icao]) {
+      mapInstance.current.removeLayer(markersRef.current[icao]);
+      delete markersRef.current[icao];
+    }
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-    
-    const newPlan = [...flightPlan];
-    const item = newPlan.splice(draggedIndex, 1)[0];
-    newPlan.splice(index, 0, item);
-    
-    setDraggedIndex(index);
-    setFlightPlan(newPlan);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null);
-  };
-
-  // Save/Load Plan Handlers
-  const handleSavePlan = () => {
-    if (!planName.trim() || flightPlan.length === 0) return;
-    const newPlan: SavedPlan = {
-      name: planName.trim(),
-      waypoints: flightPlan,
-      timestamp: Date.now()
-    };
-    const updated = [newPlan, ...savedPlans];
-    setSavedPlans(updated);
-    localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(updated));
-    setPlanName('');
-    setIsSavingPlan(false);
-  };
-
-  const loadPlan = (plan: SavedPlan) => {
-    setFlightPlan(plan.waypoints);
-    setShowSavedPlans(false);
-  };
-
-  const deleteSavedPlan = (timestamp: number) => {
-    const updated = savedPlans.filter(p => p.timestamp !== timestamp);
-    setSavedPlans(updated);
-    localStorage.setItem(SAVED_PLANS_KEY, JSON.stringify(updated));
+  const toggleWeatherConfig = (key: keyof typeof weatherConfig) => {
+    setWeatherConfig(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
     <div className="relative w-full h-full flex flex-col">
       <div className="absolute top-6 left-6 right-6 z-[1000] flex flex-col md:flex-row gap-4 pointer-events-none">
-        <form onSubmit={handleSearch} className="relative w-full md:w-96 pointer-events-auto">
+        <form onSubmit={handleSearch} className="relative w-full md:w-80 pointer-events-auto">
           <div className="relative group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value.toUpperCase())}
-              placeholder="Live ICAO Search..."
-              className={`w-full backdrop-blur-xl border rounded-2xl py-3.5 pl-12 pr-4 outline-none transition-all shadow-2xl text-sm font-medium ${
+              placeholder="Live ICAO or airport Search..."
+              className={`w-full backdrop-blur-xl border rounded-2xl py-3.5 pl-9 pr-4 outline-none transition-all shadow-2xl text-sm font-medium ${
                 isLight ? 'bg-white/90 border-slate-200 text-slate-900' : 'bg-slate-900/90 border-slate-700/50 text-white'
               }`}
             />
-            <button type="submit" disabled={isSearching} className="absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-500 px-4 min-w-[80px] flex items-center justify-center rounded-xl font-bold text-xs text-white">
-              {isSearching ? <Loader2 size={14} className="animate-spin" /> : 'FETCH'}
+            <button type="submit" disabled={isSearching} className="absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-500 px-3 min-w-[60px] flex items-center justify-center rounded-xl font-bold text-xs text-white transition-all active:scale-95">
+              {isSearching ? <Loader2 size={14} className="animate-spin" /> : 'GO'}
             </button>
           </div>
         </form>
 
         <div className="flex gap-2 pointer-events-auto">
-          <button onClick={() => setShowWeatherControls(!showWeatherControls)} className={`p-3.5 rounded-2xl backdrop-blur-xl border transition-all shadow-2xl flex items-center gap-2 font-bold text-xs ${showWeatherControls ? 'bg-blue-600 text-white' : isLight ? 'bg-white/90 text-slate-600' : 'bg-slate-900/90 text-slate-400'}`}>
+          <button onClick={() => { setShowWeatherControls(!showWeatherControls); setShowFlightPlan(false); setShowTerminals(false); }} className={`p-3.5 rounded-2xl backdrop-blur-xl border transition-all shadow-2xl flex items-center gap-2 font-bold text-xs ${showWeatherControls ? 'bg-blue-600 text-white' : isLight ? 'bg-white/90 text-slate-600' : 'bg-slate-900/90 text-slate-400'}`}>
             <Layers size={18} />
             <span className="hidden md:block uppercase tracking-widest">Map Layers</span>
           </button>
-          <button onClick={() => setShowFlightPlan(!showFlightPlan)} className={`p-3.5 rounded-2xl backdrop-blur-xl border transition-all shadow-2xl flex items-center gap-2 font-bold text-xs ${showFlightPlan ? 'bg-emerald-600 text-white' : isLight ? 'bg-white/90 text-slate-600' : 'bg-slate-900/90 text-slate-400'}`}>
+          <button onClick={() => { setShowTerminals(!showTerminals); setShowFlightPlan(false); setShowWeatherControls(false); }} className={`p-3.5 rounded-2xl backdrop-blur-xl border transition-all shadow-2xl flex items-center gap-2 font-bold text-xs ${showTerminals ? 'bg-orange-600 text-white' : isLight ? 'bg-white/90 text-slate-600' : 'bg-slate-900/90 text-slate-400'}`}>
+            <MapPin size={18} />
+            <span className="hidden md:block uppercase tracking-widest">Terminals ({terminalAirports.length})</span>
+          </button>
+          <button onClick={() => { setShowFlightPlan(!showFlightPlan); setShowTerminals(false); setShowWeatherControls(false); }} className={`p-3.5 rounded-2xl backdrop-blur-xl border transition-all shadow-2xl flex items-center gap-2 font-bold text-xs ${showFlightPlan ? 'bg-emerald-600 text-white' : isLight ? 'bg-white/90 text-slate-600' : 'bg-slate-900/90 text-slate-400'}`}>
             <Route size={18} />
             <span className="hidden md:block uppercase tracking-widest">Flight Plan ({flightPlan.length})</span>
           </button>
@@ -425,184 +462,346 @@ const MapContainer: React.FC<MapContainerProps> = ({ theme = 'dark', flightPlan,
 
       <div ref={mapRef} className="flex-1 z-0" />
 
-      {showFlightPlan && (
-        <div className={`absolute top-24 left-6 w-96 backdrop-blur-xl border rounded-[32px] p-6 z-[1000] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100vh-140px)] ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/50'}`}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Mission Route Plan</h3>
-            <div className="flex gap-2">
-              <button onClick={() => { setShowSavedPlans(!showSavedPlans); setIsSavingPlan(false); }} className={`p-1.5 rounded-lg transition-colors ${showSavedPlans ? 'text-blue-500 bg-blue-500/10' : 'text-slate-500 hover:text-white'}`}>
-                <FolderOpen size={16} />
-              </button>
-              <button onClick={() => { setIsSavingPlan(!isSavingPlan); setShowSavedPlans(false); }} className={`p-1.5 rounded-lg transition-colors ${isSavingPlan ? 'text-blue-500 bg-blue-500/10' : 'text-slate-500 hover:text-white'}`}>
-                <Save size={16} />
-              </button>
-              <button onClick={() => setShowFlightPlan(false)} className="text-slate-500 hover:text-white p-1.5"><X size={16} /></button>
-            </div>
+      {/* Map Layers & Weather Controls Panel */}
+      {showWeatherControls && (
+        <div className={`absolute top-24 left-6 w-80 backdrop-blur-xl border rounded-[32px] p-6 z-[1000] shadow-2xl flex flex-col animate-in slide-in-from-left-4 duration-200 ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/50'}`}>
+           <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xs font-black uppercase tracking-widest text-blue-500">Map Visualization</h3>
+            <button onClick={() => setShowWeatherControls(false)} className="text-slate-500 hover:text-white p-1.5"><X size={16} /></button>
           </div>
-
-          {isSavingPlan && (
-            <div className="mb-4 animate-in slide-in-from-top-2 duration-200">
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  value={planName}
-                  autoFocus
-                  onChange={(e) => setPlanName(e.target.value)}
-                  placeholder="Plan name..."
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-blue-500"
-                />
-                <button onClick={handleSavePlan} className="bg-blue-600 hover:bg-blue-500 p-2 rounded-xl text-white">
-                  <Check size={16} />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Base Charts</span>
+              <div className="grid grid-cols-1 gap-1">
+                <button onClick={() => toggleWeatherConfig('vfrSectional')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.vfrSectional ? 'bg-blue-600/10 border-blue-600/50 text-blue-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <span className="text-xs font-bold uppercase tracking-widest">VFR Sectional</span>
+                  {weatherConfig.vfrSectional ? <Check size={14} /> : null}
+                </button>
+                <button onClick={() => toggleWeatherConfig('ifrLow')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.ifrLow ? 'bg-blue-600/10 border-blue-600/50 text-blue-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <span className="text-xs font-bold uppercase tracking-widest">IFR Low Enroute</span>
+                  {weatherConfig.ifrLow ? <Check size={14} /> : null}
+                </button>
+                <button onClick={() => toggleWeatherConfig('satellite')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.satellite ? 'bg-blue-600/10 border-blue-600/50 text-blue-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <div className="flex items-center gap-2"><Satellite size={14} /> <span className="text-xs font-bold uppercase tracking-widest">Satellite Imagery</span></div>
+                  {weatherConfig.satellite ? <Check size={14} /> : null}
                 </button>
               </div>
             </div>
-          )}
 
-          {showSavedPlans && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 mb-4 animate-in fade-in duration-200">
-              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Stored Missions</h4>
-              {savedPlans.length === 0 ? (
-                <p className="text-[10px] text-slate-600 italic">No saved plans found.</p>
-              ) : (
-                savedPlans.map(plan => (
-                  <div key={plan.timestamp} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between group">
-                    <div className="cursor-pointer flex-1" onClick={() => loadPlan(plan)}>
-                      <div className="text-xs font-bold text-slate-200">{plan.name}</div>
-                      <div className="text-[9px] text-slate-500">{plan.waypoints.length} waypoints • {new Date(plan.timestamp).toLocaleDateString()}</div>
-                    </div>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => loadPlan(plan)} className="text-blue-500 hover:text-blue-400 p-1"><Download size={14} /></button>
-                      <button onClick={() => deleteSavedPlan(plan.timestamp)} className="text-red-500 hover:text-red-400 p-1"><Trash2 size={14} /></button>
-                    </div>
-                  </div>
-                ))
-              )}
-              <div className="border-t border-slate-800 my-4" />
+            <div className="space-y-2">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Weather Layers</span>
+              <div className="grid grid-cols-1 gap-1">
+                <button onClick={() => toggleWeatherConfig('radar')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.radar ? 'bg-blue-600/10 border-blue-600/50 text-blue-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <div className="flex items-center gap-2"><CloudRain size={14} /> <span className="text-xs font-bold uppercase tracking-widest">Precip Radar</span></div>
+                  {weatherConfig.radar ? <Check size={14} /> : null}
+                </button>
+                <button onClick={() => toggleWeatherConfig('sigmets')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.sigmets ? 'bg-red-600/10 border-red-600/50 text-red-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <div className="flex items-center gap-2"><ShieldAlert size={14} /> <span className="text-xs font-bold uppercase tracking-widest">SIGMETs</span></div>
+                  {weatherConfig.sigmets ? <Check size={14} /> : null}
+                </button>
+                <button onClick={() => toggleWeatherConfig('airmets')} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${weatherConfig.airmets ? 'bg-amber-600/10 border-amber-600/50 text-amber-500' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
+                  <div className="flex items-center gap-2"><Cloud size={14} /> <span className="text-xs font-bold uppercase tracking-widest">AIRMETs</span></div>
+                  {weatherConfig.airmets ? <Check size={14} /> : null}
+                </button>
+              </div>
             </div>
-          )}
 
-          {!showSavedPlans && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
-              {flightPlan.length === 0 ? <p className="text-center text-xs text-slate-500 py-12">Search airports to build your route.</p> : flightPlan.map((apt, i) => (
-                <div 
-                  key={apt.icao + i} 
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, i)}
-                  onDragOver={(e) => handleDragOver(e, i)}
-                  onDragEnd={handleDragEnd}
-                  className={`p-4 bg-slate-950 border rounded-2xl flex items-center justify-between group cursor-move transition-all ${
-                    draggedIndex === i ? 'opacity-40 border-blue-500 scale-95 shadow-2xl' : 'border-slate-800 hover:border-slate-700'
-                  }`}
-                >
+            <div className="pt-4 border-t border-slate-800">
+               <button onClick={() => toggleWeatherConfig('autoUpdate')} className={`w-full flex items-center justify-between px-4 py-4 rounded-xl border transition-all ${weatherConfig.autoUpdate ? 'bg-emerald-600/10 border-emerald-600/50 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'}`}>
                   <div className="flex items-center gap-3">
-                    <div className="text-slate-700 group-hover:text-slate-400 transition-colors">
-                      <GripVertical size={16} />
+                    <RefreshCw size={14} className={weatherConfig.autoUpdate ? 'animate-spin-slow' : ''} />
+                    <div className="text-left">
+                      <span className="block text-xs font-bold uppercase tracking-widest">WX Auto-Update</span>
+                      <span className="block text-[8px] font-medium uppercase text-slate-600">Sync every 5m</span>
                     </div>
-                    <div className="bg-emerald-600 w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-lg shadow-emerald-900/20">{apt.icao}</div>
-                    <div className="text-sm font-bold truncate max-w-[140px] text-white">{apt.name}</div>
                   </div>
-                  <button onClick={() => setFlightPlan(prev => prev.filter((_, idx) => idx !== i))} className="text-slate-500 hover:text-red-500 transition-colors p-1"><Trash2 size={16} /></button>
-                </div>
-              ))}
+                  <div className={`w-8 h-4 rounded-full relative transition-colors ${weatherConfig.autoUpdate ? 'bg-emerald-600' : 'bg-slate-800'}`}>
+                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${weatherConfig.autoUpdate ? 'left-4.5' : 'left-0.5'}`} style={{ left: weatherConfig.autoUpdate ? '1.1rem' : '0.125rem' }}></div>
+                  </div>
+                </button>
             </div>
-          )}
+          </div>
+        </div>
+      )}
 
-          {flightPlan.length > 1 && !showSavedPlans && (
+      {showTerminals && (
+        <div className={`absolute top-24 left-6 w-96 backdrop-blur-xl border rounded-[32px] p-6 z-[1000] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100vh-140px)] animate-in slide-in-from-left-4 duration-200 ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/50'}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-black uppercase tracking-widest text-orange-500">Terminal Briefing</h3>
+            <button onClick={() => setShowTerminals(false)} className="text-slate-500 hover:text-white p-1.5"><X size={16} /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+            {terminalAirports.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-xs text-slate-500 font-medium">Search for airports to monitor them on your terminal list.</p>
+              </div>
+            ) : (
+              terminalAirports.map((apt) => (
+                <div key={apt.icao} className="p-3 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between group hover:border-orange-500/30 transition-all">
+                  <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => handleAirportClick(apt)}>
+                    <div className="bg-orange-600/10 w-9 h-9 rounded-xl flex items-center justify-center text-orange-500 font-black text-xs border border-orange-500/20">{apt.icao}</div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-white leading-tight">{apt.name}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">ON CHART</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => handleAirportClick(apt)} className="p-2 text-slate-500 hover:text-orange-400 transition-colors" title="Bring Back Focus">
+                      <Target size={16} />
+                    </button>
+                    <button onClick={() => deleteTerminal(apt.icao)} className="p-2 text-slate-500 hover:text-red-400 transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {showFlightPlan && (
+        <div className={`absolute top-24 left-6 w-96 backdrop-blur-xl border rounded-[32px] p-6 z-[1000] shadow-2xl flex flex-col overflow-hidden max-h-[calc(100vh-140px)] animate-in slide-in-from-left-4 duration-200 ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/50'}`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-black uppercase tracking-widest text-emerald-500">Mission Route Plan</h3>
+            <button onClick={() => setShowFlightPlan(false)} className="text-slate-500 hover:text-white p-1.5"><X size={16} /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
+            {flightPlan.length === 0 ? <p className="text-center text-xs text-slate-500 py-12">Search airports to build your route.</p> : flightPlan.map((apt, i) => (
+              <div 
+                key={apt.icao + i} 
+                className={`p-4 bg-slate-950 border rounded-2xl flex items-center justify-between group transition-all border-slate-800 hover:border-slate-700`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="text-slate-700 group-hover:text-slate-400 transition-colors">
+                    <GripVertical size={16} />
+                  </div>
+                  <div className="bg-emerald-600 w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xs shadow-lg shadow-emerald-900/20">{apt.icao}</div>
+                  <div className="text-sm font-bold truncate max-w-[140px] text-white">{apt.name}</div>
+                </div>
+                <button onClick={() => setFlightPlan(prev => prev.filter((_, idx) => idx !== i))} className="text-slate-500 hover:text-red-500 transition-colors p-1"><Trash2 size={16} /></button>
+              </div>
+            ))}
+          </div>
+
+          {flightPlan.length > 1 && (
             <div className="mt-6 pt-6 border-t border-slate-800 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800"><div className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Distance</div><div className="text-xl font-mono font-bold text-white">{routeStats.totalDist} <span className="text-[10px] text-slate-500">NM</span></div></div>
                 <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800"><div className="text-[9px] font-black text-slate-500 mb-1 uppercase tracking-widest">Time (ETE)</div><div className="text-xl font-mono font-bold text-emerald-400">{routeStats.ete}</div></div>
               </div>
-              <div className="px-1 space-y-2">
-                <div className="flex justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                  <span>Ground Speed</span>
-                  <span className="text-blue-500">{groundSpeed} KTS</span>
-                </div>
-                <input 
-                  type="range" min="50" max="400" step="5"
-                  value={groundSpeed}
-                  onChange={(e) => setGroundSpeed(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
             </div>
           )}
         </div>
       )}
 
-      {showWeatherControls && (
-        <div className={`absolute top-24 left-6 w-80 backdrop-blur-xl border rounded-[32px] p-6 z-[1000] shadow-2xl max-h-[calc(100vh-140px)] overflow-y-auto ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/50'}`}>
-          <div className="flex items-center justify-between mb-6"><h3 className="text-xs font-black uppercase text-slate-500 tracking-widest">Map Layers</h3><button onClick={() => setShowWeatherControls(false)} className="text-slate-500 hover:text-white"><X size={16} /></button></div>
-          <div className="space-y-3">
-            {[
-              { id: 'vfrSectional', label: 'VFR Sectional', icon: Navigation },
-              { id: 'ifrLow', label: 'IFR Low Airways', icon: MoveUpRight },
-              { id: 'ifrHigh', label: 'IFR High Airways', icon: MoveUpRight },
-              { id: 'radar', label: 'Precip Radar', icon: CloudRain },
-              { id: 'sigmets', label: 'SIGMET Warning', icon: ShieldAlert },
-              { id: 'satellite', label: 'Satellite View', icon: Satellite }
-            ].map((layer) => (
-              <label key={layer.id} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-800/40 cursor-pointer transition-colors border border-transparent hover:border-slate-700/50">
-                <div className="flex items-center gap-3 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                  <layer.icon size={14} />
-                  {layer.label}
-                </div>
-                <input type="checkbox" checked={(weatherConfig as any)[layer.id]} onChange={() => setWeatherConfig(p => ({...p, [layer.id]: !(p as any)[layer.id]}))} className="w-5 h-5 rounded border-slate-700 bg-slate-900 accent-blue-600" />
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-
       {(selectedAirport || selectedHazard) && (
-        <div className={`absolute inset-y-6 right-6 w-full md:w-[420px] backdrop-blur-2xl border rounded-[32px] shadow-2xl z-[1001] flex flex-col overflow-hidden animate-in slide-in-from-right-8 duration-300 ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/95 border-slate-700/40'}`}>
-          <div className={`p-6 border-b flex items-center justify-between ${isLight ? 'border-slate-100' : 'border-slate-800'}`}>
-            <div className="flex items-center gap-3"><div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg">{selectedAirport ? <PlaneTakeoff size={20} className="text-white" /> : <ShieldAlert size={20} className="text-white" />}</div><div><h2 className={`font-bold text-lg ${isLight ? 'text-slate-900' : 'text-white'}`}>{selectedAirport ? selectedAirport.icao : 'WEATHER HAZARD'}</h2><div className="text-[10px] uppercase font-bold text-slate-500">{selectedAirport ? selectedAirport.name : selectedHazard?.hazard}</div></div></div>
-            <button onClick={() => { setSelectedAirport(null); setSelectedHazard(null); }} className="text-slate-500 hover:text-white p-2"><X size={20} /></button>
+        <div className={`absolute inset-y-6 right-6 w-full md:w-[460px] backdrop-blur-3xl border rounded-[40px] shadow-2xl z-[1001] flex flex-col overflow-hidden animate-in slide-in-from-right-8 duration-300 ${isLight ? 'bg-white/95 border-slate-200' : 'bg-slate-900/98 border-slate-700/40'}`}>
+          <div className={`p-8 border-b flex items-center justify-between ${isLight ? 'border-slate-100' : 'border-slate-800'}`}>
+            <div className="flex items-center gap-4">
+              <div className="bg-blue-600 p-3 rounded-[20px] shadow-xl shadow-blue-900/40">
+                {selectedAirport ? <PlaneTakeoff size={24} className="text-white" /> : <ShieldAlert size={24} className="text-white" />}
+              </div>
+              <div>
+                <h2 className={`font-black text-2xl tracking-tight leading-none ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  {selectedAirport ? selectedAirport.icao : 'WEATHER HAZARD'}
+                </h2>
+                <div className="text-[10px] uppercase font-black text-slate-500 mt-1 flex items-center gap-2">
+                  <span className="truncate max-w-[200px]">{selectedAirport ? selectedAirport.name : selectedHazard?.hazard}</span>
+                  <div className="w-1 h-1 rounded-full bg-slate-700"></div>
+                  <span className="text-emerald-500 animate-pulse">LIVE DATA</span>
+                </div>
+              </div>
+            </div>
+            <button onClick={() => { setSelectedAirport(null); setSelectedHazard(null); }} className="text-slate-500 hover:text-white p-2 bg-slate-800/50 hover:bg-slate-800 rounded-full transition-all">
+              <X size={20} />
+            </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+          
+          <div className="flex-1 overflow-y-auto p-8 space-y-10 custom-scrollbar">
             {selectedAirport && (
               <>
+                {/* Flight Information (NOTAMs) */}
                 <div className="space-y-4">
-                  <h3 className="text-xs font-black text-amber-600 uppercase tracking-widest flex items-center gap-2"><ShieldCheck size={16} /> Operational Intel</h3>
-                  {isIntelLoading ? <div className="py-8 text-center"><Loader2 className="animate-spin inline text-amber-500" /></div> : <div className="p-5 bg-amber-500/5 border border-amber-500/10 rounded-3xl text-sm leading-relaxed text-slate-300 font-medium">{liveIntel?.text || "No active NOTAMs reported for this terminal."}</div>}
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <ShieldCheck size={16} /> Flight Information
+                    </h3>
+                  </div>
+                  {isIntelLoading ? (
+                    <div className="py-12 bg-slate-950/50 border border-slate-800 rounded-3xl flex flex-col items-center justify-center gap-3">
+                      <Loader2 className="animate-spin text-amber-500" size={24} />
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Scanning Grounding Sources...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="p-6 bg-amber-500/5 border border-amber-500/10 rounded-[28px] text-sm leading-relaxed text-slate-200 font-medium shadow-inner">
+                        {liveIntel?.text || "No critical NOTAMs or operational delays currently reported for this terminal."}
+                      </div>
+                      {liveIntel?.links && liveIntel.links.length > 0 && (
+                        <div className="flex flex-wrap gap-2 px-1">
+                          {liveIntel.links.map((link, idx) => (
+                            <a key={idx} href={link.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-[10px] font-bold text-slate-400 transition-colors">
+                              <LinkIcon size={12} />
+                              {link.title}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-emerald-600 uppercase tracking-widest flex items-center gap-2"><Wind size={16} /> Weather Observation</h3>
-                  {isWeatherLoading ? <div className="py-8 text-center"><Loader2 className="animate-spin inline text-blue-500" /></div> : <div className="space-y-4">{weatherSummary && <div className="p-5 bg-blue-600/5 border border-blue-500/10 rounded-3xl text-sm text-slate-200 leading-relaxed font-medium">{weatherSummary}</div>}<div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl font-mono text-[10px] text-blue-400/70 break-all">{rawMetar}</div></div>}
+
+                {/* Runway Section */}
+                {selectedAirport.runways && selectedAirport.runways.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="text-[10px] font-black text-purple-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <Layout size={16} /> Runway
+                    </h3>
+                    <div className="grid grid-cols-1 gap-3">
+                      {selectedAirport.runways.map((rwy) => {
+                        const idents = rwy.ident.split('/');
+                        const isActive = idents.some(id => id === activeRwy);
+                        return (
+                          <div key={rwy.ident} className={`p-5 rounded-3xl flex items-center justify-between shadow-lg transition-all border ${isActive ? 'bg-emerald-500/10 border-emerald-500/30 ring-1 ring-emerald-500/20 scale-[1.02]' : 'bg-slate-950 border-slate-800'}`}>
+                            <div className="flex items-center gap-4">
+                              <div className="flex flex-col">
+                                <div className="text-xl font-mono font-bold text-white leading-none mb-1">
+                                  {rwy.ident}
+                                </div>
+                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{rwy.surface}</div>
+                              </div>
+                              {isActive && (
+                                <div className="bg-emerald-600 text-white text-[9px] font-black px-3 py-1 rounded-full flex items-center gap-1.5 shadow-lg shadow-emerald-900/40">
+                                  <Zap size={10} className="fill-white" /> SUGGESTED
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="text-base font-mono font-bold text-slate-200">{rwy.length} x {rwy.width}</div>
+                              <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Feet</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Weather Observation Section */}
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                      <Wind size={16} /> Weather Observation
+                    </h3>
+                    <button 
+                      onClick={() => toggleWeatherConfig('autoUpdate')}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all text-[9px] font-black uppercase tracking-tighter ${weatherConfig.autoUpdate ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-500'}`}
+                    >
+                      <RefreshCw size={10} className={weatherConfig.autoUpdate ? 'animate-spin-slow' : ''} />
+                      {weatherConfig.autoUpdate ? 'Auto-Update ON' : 'Auto-Update OFF'}
+                    </button>
+                  </div>
+                  {isWeatherLoading ? (
+                    <div className="py-12 bg-slate-950/50 border border-slate-800 rounded-3xl flex flex-col items-center justify-center gap-3">
+                      <Loader2 className="animate-spin text-emerald-500" size={24} />
+                      <span className="text-[10px] font-bold text-slate-600 uppercase">Decoding Meteorological Data...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-5 bg-slate-950 border border-slate-800 rounded-3xl flex items-center gap-4">
+                          <div className="relative w-12 h-12 rounded-full border border-slate-800 bg-slate-900 flex items-center justify-center">
+                            <ArrowUp size={24} className="text-emerald-500 transition-transform duration-1000" style={{ transform: `rotate(${windData?.dir || 0}deg)` }} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-black text-slate-500 uppercase">Winds</div>
+                            <div className="text-xl font-mono font-bold text-white">{windData ? `${windData.dir.toString().padStart(3, '0')}@${windData.speed}KT` : 'CALM'}</div>
+                          </div>
+                        </div>
+                        <div className="p-5 bg-slate-950 border border-slate-800 rounded-3xl text-center flex flex-col justify-center">
+                           <div className="text-sm font-black text-slate-500 uppercase">Category</div>
+                           <div className="text-2xl font-black text-emerald-500 tracking-tighter">VFR</div>
+                        </div>
+                      </div>
+
+                      {weatherSummary && (
+                        <div className="p-6 bg-blue-600/10 border border-blue-500/20 rounded-3xl text-sm text-slate-200 leading-relaxed font-medium shadow-inner">
+                          <div className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Weather Briefing</div>
+                          {weatherSummary}
+                        </div>
+                      )}
+
+                      <div className="p-6 bg-slate-950 border border-slate-800 rounded-3xl font-mono text-xs text-blue-400/80 font-bold break-all shadow-inner leading-relaxed">
+                        <span className="text-slate-600 mr-2 uppercase text-[9px]">RAW METAR:</span>
+                        {rawMetar}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
+
             {selectedHazard && (
               <div className="space-y-4">
-                <div className="p-5 bg-red-500/5 border border-red-500/10 rounded-3xl"><h4 className="text-sm font-bold text-red-500 mb-2 uppercase tracking-widest">{selectedHazard.hazard}</h4><p className="text-xs text-slate-300 leading-relaxed">{selectedHazard.description}</p><div className="mt-4 grid grid-cols-2 gap-2 text-[10px] font-bold"><div className="text-slate-500 uppercase">Validity:</div><div className="text-white">{selectedHazard.validity}</div><div className="text-slate-500 uppercase">Altitude:</div><div className="text-white">{selectedHazard.level}</div></div></div>
+                <div className="p-8 bg-red-500/5 border border-red-500/10 rounded-[40px] shadow-xl">
+                  <div className="flex items-center gap-3 mb-6">
+                    <ShieldAlert size={32} className="text-red-500" />
+                    <h4 className="text-xl font-black text-red-500 uppercase tracking-tight">{selectedHazard.hazard}</h4>
+                  </div>
+                  <p className="text-sm text-slate-300 leading-relaxed font-medium mb-8">
+                    {selectedHazard.description}
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                      <div className="text-[10px] font-black text-slate-600 uppercase mb-1">Validity</div>
+                      <div className="text-xs font-bold text-white font-mono">{selectedHazard.validity}</div>
+                    </div>
+                    <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                      <div className="text-[10px] font-black text-slate-600 uppercase mb-1">Flight Level</div>
+                      <div className="text-xs font-bold text-white font-mono">{selectedHazard.level}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
+
           {selectedAirport && (
-            <div className="p-6 border-t border-slate-800 bg-slate-900/90 flex flex-col gap-3">
+            <div className="p-8 border-t border-slate-800 bg-slate-900/95 flex flex-col gap-3">
               <button onClick={() => setFlightPlan(p => {
                 if (p.some(apt => apt.icao === selectedAirport.icao)) return p;
                 return [...p, selectedAirport];
-              })} disabled={flightPlan.some(p => p.icao === selectedAirport.icao)} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl transition-all active:scale-[0.98]"><Plus size={18} /> ADD TO FLIGHT PLAN</button>
+              })} disabled={flightPlan.some(p => p.icao === selectedAirport.icao)} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-black py-5 rounded-[24px] flex items-center justify-center gap-4 shadow-2xl shadow-emerald-900/40 transition-all active:scale-[0.98] tracking-widest text-sm">
+                <Plus size={20} /> ADD TO MISSION PLAN
+              </button>
               
               <button 
                 onClick={() => {
-                  setPinnedAirports(prev => {
+                  setTerminalAirports(prev => {
                     if (prev.some(a => a.icao === selectedAirport.icao)) return prev;
-                    return [...prev, selectedAirport];
+                    return [selectedAirport, ...prev];
                   });
-                  alert(`${selectedAirport.icao} pinpointed on map.`);
                 }} 
-                disabled={pinnedAirports.some(p => p.icao === selectedAirport.icao)}
-                className="w-full bg-blue-600/10 hover:bg-blue-600/20 disabled:opacity-50 text-blue-500 border border-blue-500/30 font-bold py-3 rounded-2xl flex items-center justify-center gap-3 transition-all"
+                disabled={terminalAirports.some(p => p.icao === selectedAirport.icao)}
+                className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 border border-slate-700 font-bold py-4 rounded-[24px] flex items-center justify-center gap-3 transition-all"
               >
-                <MapPin size={16} /> PINPOINT ON MAP
+                <MapPin size={18} /> SAVE TO TERMINAL DECK
               </button>
             </div>
           )}
         </div>
       )}
+      <style>{`
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 8s linear infinite;
+        }
+      `}</style>
     </div>
   );
 };

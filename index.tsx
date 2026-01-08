@@ -1,9 +1,8 @@
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 
-console.log("SkyNav Application Initializing...");
+console.log("Wing Navigator Application Initializing...");
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -18,7 +17,7 @@ try {
       <App />
     </React.StrictMode>
   );
-  console.log("SkyNav Application Mounted successfully.");
+  console.log("Wing Navigator Application Mounted successfully.");
 } catch (err) {
-  console.error("SkyNav Mounting Failure:", err);
+  console.error("Wing Navigator Mounting Failure:", err);
 }

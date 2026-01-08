@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Search, Wind, Cloud, MapPin, Loader2, FileText, ToggleLeft, ToggleRight, Layout } from 'lucide-react';
 import { interpretWeather } from '../services/gemini.ts';
@@ -69,9 +68,9 @@ const WeatherView: React.FC = () => {
           <button 
             type="submit"
             disabled={loading}
-            className="absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-500 px-6 min-w-[100px] flex items-center justify-center rounded-xl font-bold gap-2 disabled:opacity-50 text-white transition-all active:scale-95"
+            className="absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-500 px-4 min-w-[70px] flex items-center justify-center rounded-xl font-bold gap-2 disabled:opacity-50 text-white transition-all active:scale-95"
           >
-            {loading ? <Loader2 className="animate-spin" /> : 'FETCH'}
+            {loading ? <Loader2 className="animate-spin" /> : 'GO'}
           </button>
         </div>
       </form>

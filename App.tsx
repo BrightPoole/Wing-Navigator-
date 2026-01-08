@@ -46,7 +46,6 @@ const App: React.FC = () => {
       name,
       viewMode: currentView,
       checklistState: JSON.parse(JSON.stringify(checklistState)),
-      // For now we don't capture leaflet ref here, but we could if we moved map state to global
     };
     
     setCheckpoints(prev => [...prev, newCheckpoint]);
@@ -72,7 +71,7 @@ const App: React.FC = () => {
       case ViewMode.CALC:
         return <CalculatorView />;
       case ViewMode.CHECKLIST:
-        return <ChecklistView />; // In a real app we'd pass checklistState and setChecklistState
+        return <ChecklistView />; 
       case ViewMode.CHECKPOINTS:
         return (
           <CheckpointView 
